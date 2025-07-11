@@ -1,0 +1,59 @@
+import os
+from matplotlib.image import imread
+import numpy as np
+from skimage.transform import resize
+from sklearn.preprocessing import StandardScaler
+
+yale_path = 'path/to/your/database'
+data, labels = [], []
+for fname in sorted(os.listdir(yale_path)):
+        if fname.startswith("subject"):
+            person_id = int(fname[7:9])
+            img = imread(os.path.join(yale_path, fname))
+            img = resize(img, (28,28), anti_aliasing=True).astype(np.float32)
+            data.append(img.flatten())
+            labels.append(person_id)
+
+data = np.array(data)
+labels = np.array(labels)
+scaler = StandardScaler()
+data = scaler.fit_transform(data)
+correct = 0
+total = len(data)
+
+for i in range(total):
+    test_img = data[i]
+    test_label = labels[i]
+    train_imgs = np.delete(data, i, axis=0)
+    train_labels = np.delete(labels, i, axis=0)
+    noise_train = np.random.normal(0.0, 0.1, train_imgs.shape)
+
+    mean_face = np.mean(train_imgs, axis=0)
+    train_centered = train_imgs - mean_face
+    test_centered = test_img - mean_face
+
+    cov_matrix = (train_centered @ train_centered.T) / train_centered.shape[0]
+    eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+    idx = np.argsort(eigenvalues)[::-1]
+    eigenvectors = eigenvectors[:, idx]
+    eigenfaces = train_centered.T @ eigenvectors
+    eigenfaces = eigenfaces / np.linalg.norm(eigenfaces, axis=0)
+
+    explained_variance = eigenvalues[idx] / np.sum(eigenvalues)
+    cumulative_variance = np.cumsum(explained_variance)
+    k = np.searchsorted(cumulative_variance, 0.95)
+
+    eigenfaces_k = eigenfaces[:, :k + 1]
+
+    train_proj = train_centered @ eigenfaces_k
+    test_proj = test_centered @ eigenfaces_k
+    diff = train_proj - test_proj
+    distances = np.linalg.norm(diff, axis=1)
+    nn_idx = np.argmin(distances)
+    prediction = train_labels[nn_idx]
+
+    if prediction == test_label:
+        correct += 1
+
+print(f"Leave-One-Out Accuracy with 28x28 images: {correct / total:.4f}")
+
