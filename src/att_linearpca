@@ -1,55 +1,61 @@
-import os
-import numpy as np
 from matplotlib.image import imread
-from sklearn.metrics import accuracy_score
+import numpy as np
+import os
+from skimage.transform import resize
 
-att_path = 'path/toyour/database'
+att_path = '/Users/yurinayano/Documents/Bachelorarbeit_Python/attdatabase/'
 
-filenames = sorted(os.listdir(att_path))
-train_images, train_labels = [], []
-test_images, test_labels = [], []
+filenames = sorted([f for f in os.listdir(att_path) if f.lower().endswith(".pgm")])
+all_images = []
+all_labels = []
 
-for fname in filenames:
-    if fname.lower().endswith(".pgm"):
-        person_id = int(fname[:2])
-        img_id = int(fname[3:-4])
-        image = imread(os.path.join(att_path, fname))
-        if 31 <= person_id <= 40:
-            if 1 <= img_id <= 6:
-                train_images.append(image)
-                train_labels.append(person_id)
-            elif img_id == 8:
-                test_images.append(image)
-                test_labels.append(person_id)
+for names in filenames:
+    person_id = int(names[:2])
+    full_path = os.path.join(att_path, names)
+    image = imread(full_path)
+    image_resized = resize(image, (28, 28), anti_aliasing=True)
 
-X_train = np.array(train_images).reshape(len(train_images), -1)
-X_test = np.array(test_images).reshape(len(test_images), -1)
+    all_images.append(image_resized.flatten())
+    all_labels.append(person_id)
 
-mean = np.mean(X_train, axis=0)
-X_train_centered = X_train - mean
-X_test_centered = X_test - mean
+all_images = np.array(all_images)
+all_labels = np.array(all_labels)
 
-C = (X_train_centered @ X_train_centered.T) / X_train_centered.shape[0]
-evals, evecs = np.linalg.eig(C)
-idx = np.argsort(evals)[::-1]
-evals = evals[idx]
-evecs = evecs[:, idx]
-U = X_train_centered.T @ evecs
-U = U / np.linalg.norm(U, axis=0)
+correct = 0
+total = len(all_images)
 
-explained = evals / np.sum(evals)
-cumulative = np.cumsum(explained)
-k = np.searchsorted(cumulative, 0.80)
+for i in range(total):
+    test_img = all_images[i]
+    test_label = all_labels[i]
 
-X_train_proj = X_train_centered @ U[:, :k+1]
-X_test_proj = X_test_centered @ U[:, :k+1]
+    train_imgs = np.delete(all_images, i, axis=0)
+    train_labels = np.delete(all_labels, i, axis=0)
 
-diff = X_test_proj[:, np.newaxis, :] - X_train_proj[np.newaxis, :, :]
-dists = np.linalg.norm(diff, axis=2)
-pred_idx = np.argmin(dists, axis=1)
-pred_labels = np.array([train_labels[i] for i in pred_idx])
-acc = accuracy_score(test_labels, pred_labels)
+    mean_face = np.mean(train_imgs, axis=0)
+    train_centered = train_imgs - mean_face
+    test_centered = test_img - mean_face
 
-print("Euclidean 1-NN:", pred_labels)
-print(f"Euclidean 1-NN Accuracy: {acc:.2f}")
+    cov_matrix = (train_centered @ train_centered.T) / train_centered.shape[0]
+    eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+    idx = np.argsort(eigenvalues)[::-1]
+    eigenvectors = eigenvectors[:, idx]
+    eigenfaces = train_centered.T @ eigenvectors
+    eigenfaces = eigenfaces / np.linalg.norm(eigenfaces, axis=0)
 
+    explained_variance = eigenvalues[idx] / np.sum(eigenvalues)
+    cumulative_variance = np.cumsum(explained_variance)
+    k = np.searchsorted(cumulative_variance, 0.95)
+    eigenfaces_k = eigenfaces[:, :k + 1]
+
+    train_proj = train_centered @ eigenfaces_k
+    test_proj = test_centered @ eigenfaces_k  # (k+1,)
+
+    diff = train_proj - test_proj
+    distances = np.linalg.norm(diff, axis=1)
+    nn_idx = np.argmin(distances)
+    prediction = train_labels[nn_idx]
+
+    if prediction == test_label:
+        correct += 1
+
+print(f"Leave-One-Out Accuracy with 28x28 images: {correct / total:.4f}")
