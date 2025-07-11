@@ -3,7 +3,7 @@ import numpy as np
 import os
 from skimage.transform import resize
 
-att_path = '/Users/yurinayano/Documents/Bachelorarbeit_Python/attdatabase/'
+att_path = 'path/to/your/database'
 
 filenames = sorted([f for f in os.listdir(att_path) if f.lower().endswith(".pgm")])
 all_images = []
