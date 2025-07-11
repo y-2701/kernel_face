@@ -95,7 +95,7 @@ def project(X_train, x_test, kernel, degree=None, gamma=None, eigenvectors=None,
 
     return K_test_centered @ eigenvectors
 
-def main(image_dir, kernel='polynomial', degree=2, alpha=0.01, r=1.0):
+def main(kernel='polynomial', degree=2, alpha=0.01, r=1.0):
     X_all, y_all = load_cache("att_28x28.npz")
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_all)
@@ -147,3 +147,5 @@ def main(image_dir, kernel='polynomial', degree=2, alpha=0.01, r=1.0):
             best_acc = acc_k
 
     print(f" Best k-NN Accuracy: {best_acc:.3f} at k={best_k}")
+npz = 'path/toyour/npzpath'
+main()
