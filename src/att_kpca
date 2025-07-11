@@ -136,7 +136,6 @@ def main(kernel='polynomial', degree=2, alpha=0.01, r=1.0):
             knn_preds_by_k[k].append(pred_knn[0])
 
     acc_svm = accuracy_score(y_true_svm, y_pred_svm)
-    print(f"\nLOO Accuracy with {kernel.upper()} Kernel:")
     print(f"   SVM: {acc_svm:.3f}")
 
     best_k, best_acc = 1, 0.0
