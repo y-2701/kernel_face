@@ -1,0 +1,55 @@
+import os
+import numpy as np
+from matplotlib.image import imread
+from sklearn.metrics import accuracy_score
+
+att_path = 'path/toyour/database'
+
+filenames = sorted(os.listdir(att_path))
+train_images, train_labels = [], []
+test_images, test_labels = [], []
+
+for fname in filenames:
+    if fname.lower().endswith(".pgm"):
+        person_id = int(fname[:2])
+        img_id = int(fname[3:-4])
+        image = imread(os.path.join(att_path, fname))
+        if 31 <= person_id <= 40:
+            if 1 <= img_id <= 6:
+                train_images.append(image)
+                train_labels.append(person_id)
+            elif img_id == 8:
+                test_images.append(image)
+                test_labels.append(person_id)
+
+X_train = np.array(train_images).reshape(len(train_images), -1)
+X_test = np.array(test_images).reshape(len(test_images), -1)
+
+mean = np.mean(X_train, axis=0)
+X_train_centered = X_train - mean
+X_test_centered = X_test - mean
+
+C = (X_train_centered @ X_train_centered.T) / X_train_centered.shape[0]
+evals, evecs = np.linalg.eig(C)
+idx = np.argsort(evals)[::-1]
+evals = evals[idx]
+evecs = evecs[:, idx]
+U = X_train_centered.T @ evecs
+U = U / np.linalg.norm(U, axis=0)
+
+explained = evals / np.sum(evals)
+cumulative = np.cumsum(explained)
+k = np.searchsorted(cumulative, 0.80)
+
+X_train_proj = X_train_centered @ U[:, :k+1]
+X_test_proj = X_test_centered @ U[:, :k+1]
+
+diff = X_test_proj[:, np.newaxis, :] - X_train_proj[np.newaxis, :, :]
+dists = np.linalg.norm(diff, axis=2)
+pred_idx = np.argmin(dists, axis=1)
+pred_labels = np.array([train_labels[i] for i in pred_idx])
+acc = accuracy_score(test_labels, pred_labels)
+
+print("Euclidean 1-NN:", pred_labels)
+print(f"Euclidean 1-NN Accuracy: {acc:.2f}")
+
