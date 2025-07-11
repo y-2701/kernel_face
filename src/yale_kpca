@@ -1,0 +1,124 @@
+import os
+import numpy as np
+from collections import defaultdict
+from matplotlib.image import imread
+from skimage.transform import resize
+from scipy.spatial.distance import cdist
+from sklearn.preprocessing import StandardScaler
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, pairwise_kernels
+from sklearn.model_selection import LeaveOneOut
+
+def load(yale_path, shape=(28, 28)):
+    X, y = [], []
+    for fname in sorted(os.listdir(yale_path)):
+        if fname.startswith("subject"):
+            person_id = int(fname[7:9])
+            img = imread(os.path.join(yale_path, fname))
+            img = resize(img, shape, anti_aliasing=True).astype(np.float32)
+            X.append(img.flatten())
+            y.append(person_id)
+    return np.array(X), np.array(y)
+
+def rbf(X, gamma):
+    return np.exp(-gamma * cdist(X, X, metric='sqeuclidean'))
+
+def polynomial(X, degree, alpha=1.0, r=1.0):
+    return (alpha * (X @ X.T) + r) ** degree
+
+def center_kernel(K):
+    n = K.shape[0]
+    ones = np.ones((n, n)) / n
+    return K - ones @ K - K @ ones + ones @ K @ ones
+
+def kernel_pca(X, kernel, degree=None, gamma=None, alpha=1.0, r=1.0, variance_threshold=0.90):
+    if kernel == 'rbf':
+        K = rbf(X, gamma)
+    elif kernel == 'polynomial':
+        K = polynomial(X, degree=degree, alpha=alpha, r=r)
+    else:
+        None
+
+    K_centered = center_kernel(K)
+    eigenvalues, eigenvectors = np.linalg.eigh(K_centered)
+    idx = np.argsort(eigenvalues)[::-1]
+    eigenvalues, eigenvectors = eigenvalues[idx], eigenvectors[:, idx]
+
+    mask = eigenvalues > 1e-10
+    eigenvalues, eigenvectors = eigenvalues[mask], eigenvectors[:, mask]
+
+    var_ratio = eigenvalues / np.sum(eigenvalues)
+    cumulative = np.cumsum(var_ratio)
+    n_components = np.searchsorted(cumulative, variance_threshold) + 1
+    top_eigenvalues = eigenvalues[:n_components]
+    top_eigenvectors = eigenvectors[:, :n_components]
+    norm_eigenvectors = top_eigenvectors / np.sqrt(top_eigenvalues)
+
+    return K_centered, norm_eigenvectors, top_eigenvalues
+
+def project(X_train, x_test, kernel, degree=None, gamma=None, eigenvectors=None, alpha=1.0, r=1.0):
+    train_and_test = np.vstack([X_train, x_test.reshape(1, -1)])
+
+    kernel_params = {}
+    if kernel == 'rbf':
+        kernel_params['gamma'] = gamma
+    elif kernel == 'polynomial':
+        kernel_params['gamma'] = alpha
+        kernel_params['degree'] = degree
+        kernel_params['coef0'] = r
+
+    K_full = pairwise_kernels(train_and_test, metric=kernel, **kernel_params)
+
+    K_mean_row = np.mean(K_full, axis=1, keepdims=True)
+    K_mean_col = np.mean(K_full, axis=0, keepdims=True)
+    K_mean_total = np.mean(K_full)
+    K_full_centered = K_full - K_mean_row - K_mean_col + K_mean_total
+
+    K_test_centered = K_full_centered[-1, :-1]
+
+    return K_test_centered @ eigenvectors
+
+def run_pipeline(yale_path, kernel='polynomial', degree=2, alpha=1.0, r=1.0, gamma=0.00153):
+    X, y = load(yale_path)
+    X = StandardScaler().fit_transform(X)
+
+    loo = LeaveOneOut()
+    y_true_svm, y_pred_svm = [], []
+    y_true_knn = []
+    knn_preds_by_k = defaultdict(list)
+
+    for train_idx, test_idx in loo.split(X):
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+
+        K_train, eigvecs, _ = kernel_pca(
+            X_train, kernel=kernel, degree=degree, gamma=gamma,
+            alpha=alpha, r=r, variance_threshold=0.95
+        )
+        X_train_proj = K_train @ eigvecs
+
+        X_test_proj = np.vstack([
+            project(X_train, X[i], kernel=kernel, degree=degree, gamma=gamma,
+                    alpha=alpha, r=r, eigenvectors=eigvecs)
+            for i in test_idx
+        ])
+
+        clf = SVC(kernel="linear")
+        clf.fit(X_train_proj, y_train)
+        pred_svm = clf.predict(X_test_proj)
+
+        y_true_svm.append(y_test[0])
+        y_pred_svm.append(pred_svm[0])
+
+        y_true_knn.append(y_test[0])
+        for k in range(1, 11):
+            knn = KNeighborsClassifier(n_neighbors=k)
+            knn.fit(X_train_proj, y_train)
+            pred_knn = knn.predict(X_test_proj)
+            knn_preds_by_k[k].append(pred_knn[0])
+
+    acc_svm = accuracy_score(y_true_svm, y_pred_svm)
+    print(f"   SVM: {acc_svm:.3f}")
+
+run_pipeline("path/to/database")
