@@ -57,68 +57,65 @@ def kernel_pca(X, kernel, degree=None, gamma=None, alpha=1.0, r=1.0, variance_th
 
     return K_centered, norm_eigenvectors, top_eigenvalues
 
-def project(X_train, x_test, kernel, degree=None, gamma=None, eigenvectors=None, alpha=1.0, r=1.0):
-    train_and_test = np.vstack([X_train, x_test.reshape(1, -1)])
+def project(train, test, kernel, degree=None, gamma=None, eigenvectors=None, alpha=1.0, r=1.0):
+    all_data = np.vstack([train, test.reshape(1, -1)])
 
-    kernel_params = {}
+    params = {}
     if kernel == 'rbf':
-        kernel_params['gamma'] = gamma
+        params['gamma'] = gamma
     elif kernel == 'polynomial':
-        kernel_params['gamma'] = alpha
-        kernel_params['degree'] = degree
-        kernel_params['coef0'] = r
+        params['gamma'] = alpha
+        params['degree'] = degree
+        params['coef0'] = r
 
-    K_full = pairwise_kernels(train_and_test, metric=kernel, **kernel_params)
-
+    K_full = pairwise_kernels(all_data, metric=kernel, **params)
     K_mean_row = np.mean(K_full, axis=1, keepdims=True)
     K_mean_col = np.mean(K_full, axis=0, keepdims=True)
     K_mean_total = np.mean(K_full)
     K_full_centered = K_full - K_mean_row - K_mean_col + K_mean_total
-
     K_test_centered = K_full_centered[-1, :-1]
 
     return K_test_centered @ eigenvectors
 
-def run_pipeline(yale_path, kernel='polynomial', degree=2, alpha=1.0, r=1.0, gamma=0.00153):
-    X, y = load(yale_path)
-    X = StandardScaler().fit_transform(X)
+def main(yale_path, kernel='polynomial', degree=2, alpha=1.0, r=1.0, gamma=0.00153):
+    images, labels = load(yale_path)
+    images = StandardScaler().fit_transform(images)
 
     loo = LeaveOneOut()
-    y_true_svm, y_pred_svm = [], []
-    y_true_knn = []
-    knn_preds_by_k = defaultdict(list)
+    true_svm, pred_svm = [], []
+    true_knn = []
+    knn_pred = defaultdict(list)
 
-    for train_idx, test_idx in loo.split(X):
-        X_train, X_test = X[train_idx], X[test_idx]
-        y_train, y_test = y[train_idx], y[test_idx]
+    for train, test in loo.split(images):
+        train_img, test_img = images[train], images[test]
+        train_label, test_label = labels[train], labels[test]
 
-        K_train, eigvecs, _ = kernel_pca(
-            X_train, kernel=kernel, degree=degree, gamma=gamma,
+        K_train, eigvectors, _ = kernel_pca(
+            train_img, kernel=kernel, degree=degree, gamma=gamma,
             alpha=alpha, r=r, variance_threshold=0.95
         )
-        X_train_proj = K_train @ eigvecs
+        train_proj = K_train @ eigvectors
 
-        X_test_proj = np.vstack([
-            project(X_train, X[i], kernel=kernel, degree=degree, gamma=gamma,
-                    alpha=alpha, r=r, eigenvectors=eigvecs)
-            for i in test_idx
+        test_proj = np.vstack([
+            project(train_img, images[i], kernel=kernel, degree=degree, gamma=gamma, eigenvectors=eigvectors, alpha=alpha, r=r)
+            for i in test
         ])
 
         clf = SVC(kernel="linear")
-        clf.fit(X_train_proj, y_train)
-        pred_svm = clf.predict(X_test_proj)
+        clf.fit(train_proj, train_label)
+        svm_predictions = clf.predict(test_proj)
 
-        y_true_svm.append(y_test[0])
-        y_pred_svm.append(pred_svm[0])
+        true_svm.append(test_label[0])
+        pred_svm.append(svm_predictions[0])
 
-        y_true_knn.append(y_test[0])
+        true_knn.append(test_label[0])
         for k in range(1, 11):
             knn = KNeighborsClassifier(n_neighbors=k)
-            knn.fit(X_train_proj, y_train)
-            pred_knn = knn.predict(X_test_proj)
-            knn_preds_by_k[k].append(pred_knn[0])
+            knn.fit(train_proj, train_label)
+            pred_knn = knn.predict(test_proj)
+            knn_pred[k].append(pred_knn[0])
 
-    acc_svm = accuracy_score(y_true_svm, y_pred_svm)
+    acc_svm = accuracy_score(true_svm, pred_svm)
     print(f"   SVM: {acc_svm:.3f}")
 
-run_pipeline("path/to/database")
+main("/path/to/your/data")
