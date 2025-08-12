@@ -55,5 +55,5 @@ for i in range(total):
     if prediction == test_label:
         correct += 1
 
-print(f"Leave-One-Out Accuracy with 28x28 images: {correct / total:.4f}")
+print(f"Accuracy: {correct / total:.3f}")
 
