@@ -10,7 +10,35 @@ from sklearn.model_selection import LeaveOneOut
 from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import cdist
 
+def load(att_path, shape=(28, 28)):
+    '''
+    Resizes input data to 28x28.
+    :param att_path: Path to the directory
+    :param shape: Target image size, default 28x28
+    :return: Resized and flattened image data and person IDs
+    '''
+    image_vectors, labels = [], []
+    for fname in sorted(os.listdir(att_path)):
+        if fname.lower().endswith(".pgm"):
+            person_id = int(fname[:2])
+            image = imread(os.path.join(att_path, fname))
+            image = resize(image, shape, anti_aliasing=True)
+            image_vectors.append(image.flatten())
+            labels.append(person_id)
+
+    image_vectors = np.array(image_vectors)
+    labels = np.array(labels)
+
+    return image_vectors,labels
+
 def gauss(images, mean=0.0, std=0.1):
+    '''
+    Adds Gaussian noise to images.
+    :param images: ndarray
+    :param mean: mean value for Gaussian noise distribution
+    :param std: standard deviation of the Gaussian noise distribution
+    :return: images with noise
+    '''
     noisy_images = []
     for i in images:
         noise = np.random.normal(mean, std, i.shape)
@@ -20,17 +48,48 @@ def gauss(images, mean=0.0, std=0.1):
     return np.array(noisy_images)
 
 def rbf(X, gamma):
+    '''
+    Computes the RBF kernel matrix.
+    :param X: Input data matrix
+    :param gamma: Coefficient
+    :return: RBF kernel matrix
+    '''
     return np.exp(-gamma * cdist(X, X, metric='sqeuclidean'))
 
 def polynomial(X, degree, alpha=1.0, r=1.0):
+    '''
+    Computes the polynomial kernel matrix.
+    :param X: Input data matrix
+    :param degree: Polynomial degree of kernel
+    :param alpha: Scaling factor
+    :param r: Free parameter
+    :return: Polynomial kernel matrix
+    '''
     return (alpha * (X @ X.T) + r) ** degree
 
 def center_kernel(K):
+    '''
+    Mean centers the kernel matrix.
+    :param K: Kernel matrix calculated above
+    :return: Centered kernel matrix
+    '''
     n = K.shape[0]
     ones = np.ones((n, n)) / n
     return K - ones @ K - K @ ones + ones @ K @ ones
 
 def kernel_pca(X_train, kernel, degree=None, gamma=None, alpha=1.0, r=1.0, variance_threshold=0.90):
+    '''
+    Performs Kernel PCA on given input training data.
+    :param X_train: Training data matrix
+    :param kernel: Chosen kernel function
+    :param degree: Degree of the polynomial kernel
+    :param gamma: Optional RBF kernel coefficient
+    :param alpha: Optional Polynomial kernel scaling factor
+    :param r: Optional Polynomial kernel parameter
+    :param variance_threshold: Variance percentage of principcal components for determining number of components
+    :return: Centered kernel matrix, eigenvectors corresponding to the principal components that satisfy the variance threshold,
+    corresponding eigenvalues
+    '''
     if kernel == 'rbf':
         K = rbf(X_train, gamma)
     elif kernel == 'polynomial':
@@ -56,17 +115,30 @@ def kernel_pca(X_train, kernel, degree=None, gamma=None, alpha=1.0, r=1.0, varia
     return K_centered, norm_eigenvectors, top_eigenvalues
 
 def project(X_train, x_test, kernel, degree=None, gamma=None, eigenvectors=None, K_train=None, alpha=1.0, r=1.0):
+    '''
+    Projects a test sample into the kPCA space.
+    :param X_train: Training data matrix
+    :param x_test: Test sample
+    :param kernel: Chosen kernel function
+    :param degree: Degree of the polynomial kernel
+    :param gamma: Optional RBF kernel coefficient
+    :param eigenvectors: Eigenvectors of the centered training kernel matrix
+    :param K_train: Training kernel matrix
+    :param alpha: Optional Polynomial kernel scaling factor
+    :param r: Optional Polynomial kernel parameter
+    :return: Projected test sample in kPCA space
+    '''
     train_and_test = np.vstack([X_train, x_test.reshape(1, -1)])
 
-    kernel_params = {}
+    params = {}
     if kernel == 'rbf':
-        kernel_params['gamma'] = gamma
+        params['gamma'] = gamma
     elif kernel == 'polynomial':
-        kernel_params['gamma'] = alpha
-        kernel_params['degree'] = degree
-        kernel_params['coef0'] = r
+        params['gamma'] = alpha
+        params['degree'] = degree
+        params['coef0'] = r
 
-    K_full = pairwise_kernels(train_and_test, metric=kernel, **kernel_params)
+    K_full = pairwise_kernels(train_and_test, metric=kernel, **params)
 
     K_mean_row = np.mean(K_full, axis=1, keepdims=True)
     K_mean_col = np.mean(K_full, axis=0, keepdims=True)
@@ -76,20 +148,17 @@ def project(X_train, x_test, kernel, degree=None, gamma=None, eigenvectors=None,
     K_test_centered = K_full_centered[-1, :-1]
 
     return K_test_centered @ eigenvectors
-def load(att_path, shape=(28, 28)):
-    image_vectors, labels = [], []
-    for fname in sorted(os.listdir(att_path)):
-        if fname.lower().endswith(".pgm"):
-            person_id = int(fname[:2])
-            image = imread(os.path.join(att_path, fname))
-            image = resize(image, shape, anti_aliasing=True)
-            image_vectors.append(image.flatten())
-            labels.append(person_id)
 
-    image_vectors = np.array(image_vectors)
-    labels = np.array(labels)
-    return image_vectors,labels
 def main(att_path, kernel='polynomial', degree=2, alpha=0.01, r=1.0):
+    '''
+    Performs LOO evaluation of kernel PCA with SVm and k-NN.
+    :param att_path: Path to directory
+    :param kernel: Chosen kernel function, default: polynomial
+    :param degree: Degree of polynomial kernel
+    :param alpha: Optional polynomial kernel scaling factor
+    :param r: Optional parameter for polynomial kernel
+    :return: Accuracies of classification
+    '''
     images, labels = load(att_path)
     scaler = StandardScaler()
     images_scaled = scaler.fit_transform(images)
@@ -130,7 +199,7 @@ def main(att_path, kernel='polynomial', degree=2, alpha=0.01, r=1.0):
             knn_prediction[k].append(pred_knn[0])
 
     acc_svm = accuracy_score(true_svm, pred_svm)
-    print(f"   SVM: {acc_svm:.3f}")
+    print(f"SVM Accuracy: {acc_svm:.3f}")
 
     best_k, best_acc = 1, 0.0
     for k in range(1, 11):
@@ -139,6 +208,6 @@ def main(att_path, kernel='polynomial', degree=2, alpha=0.01, r=1.0):
             best_k = k
             best_acc = acc_k
 
-    print(f" Best k-NN Accuracy: {best_acc:.3f} at k={best_k}")
+    print(f"k-NN Accuracy: {best_acc:.3f} at k={best_k}")
 
-main(path/to/your/file)
+main()
